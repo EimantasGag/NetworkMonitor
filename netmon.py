@@ -1,9 +1,12 @@
 from websockets.sync.client import connect
 import pyshark
 import psutil
+import socket
 
 host_interface = 'Ethernet'
 host_mac = None
+
+cachedPorts = {} # port -> process name
 
 def get_mac_address(interface_name):
     addrs = psutil.net_if_addrs()
@@ -11,6 +14,13 @@ def get_mac_address(interface_name):
         if addr.family == psutil.AF_LINK:
             return addr.address
     return None
+
+def get_hostname_by_ip(ip_address):
+    try:
+        hostname, _, _ = socket.gethostbyaddr(ip_address)
+        return hostname
+    except socket.herror:
+        return "Hostname not found"
 
 def find_pid_by_port(port):
     port = int(port)
@@ -29,20 +39,48 @@ def find_processname_by_pid(pid):
             return None
     return None
 
-def create_message(packet):
+def create_message(packet, type):
     packet_mac = packet.eth.dst
     length = int(packet.frame_info.len)
     
+    # Receiving packets
     if packet_mac == host_mac:
-        port = int(packet.tcp.dstport)
-        proc_name = find_processname_by_pid(find_pid_by_port(port))
+        port = int(packet.tcp.dstport) if type == 'tcp' else int(packet.udp.dstport)
+
+        if port not in cachedPorts:
+            proc_name = find_processname_by_pid(find_pid_by_port(port))
+
+            # If a packet is received on port 80 or 443, get the hostname by IP
+            if type == 'tcp' and (packet.tcp.srcport == "80" or packet.tcp.srcport == "443"):
+                proc_name = get_hostname_by_ip(packet.ip.src)
+            elif type == 'udp' and (packet.udp.srcport == "80" or packet.udp.srcport == "443"):
+                proc_name = get_hostname_by_ip(packet.ip.src)
+
+            cachedPorts[port] = proc_name
+        else:
+            proc_name = cachedPorts[port]
+
         if proc_name is None:
             msg = f"R {port} {packet.ip.src} {length}"
         else:
             msg = f"R {port} {proc_name.replace(" ", "_")} {length}"
-    else:
-        port = int(packet.tcp.srcport)
-        proc_name = find_processname_by_pid(find_pid_by_port(port))
+    # Sending packets
+    else: 
+        port = int(packet.tcp.srcport) if type == 'tcp' else int(packet.udp.srcport)
+
+        if port not in cachedPorts:
+            proc_name = find_processname_by_pid(find_pid_by_port(port))
+
+            # If a packet is received on port 80 or 443, get the hostname by IP
+            if type == 'tcp' and (packet.tcp.dstport == "80" or packet.tcp.dstport == "443"):
+                proc_name = get_hostname_by_ip(packet.ip.dst)
+            elif type == 'udp' and (packet.udp.dstport == "80" or packet.udp.dstport == "443"):
+                proc_name = get_hostname_by_ip(packet.ip.dst)
+
+            cachedPorts[port] = proc_name
+        else:
+            proc_name = cachedPorts[port]
+
         if proc_name is None:
             msg = f"S {port} {packet.ip.dst} {length}"
         else:
@@ -54,9 +92,9 @@ def resolve_packets(capture, websocket):
     for packet in capture.sniff_continuously():
         try:
             if hasattr(packet, 'tcp'):
-                msg = create_message(packet)
+                msg = create_message(packet, 'tcp')
             elif hasattr(packet, 'udp'):
-                msg = create_message(packet)
+                msg = create_message(packet, 'udp')
             else:
                 msg = None
         except AttributeError:
