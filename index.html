@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Network Packet Monitor</title>
+  <style>
+    body { font-family: Arial; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h1>Live Packet Data</h1>
+  <table id="packetTable">
+    <tr>
+      <th>Process</th>
+      <th>Sent bytes</th>
+      <th>Received bytes</th>
+    </tr>
+  </table>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const trafficData = {};  // Stores data as: { processName: { received: X, sent: Y } }
+    const table = document.getElementById('packetTable');
+    const updateTableRate = 100; // Update every 100 packets
+
+    function updateTable(processName) {
+      for (let i = 1; i < table.rows.length; i++) {
+        const row = table.rows[i];
+        const sentKB = ~~(trafficData[processName].sent / 1000);
+        const receivedKB = ~~(trafficData[processName].received / 1000);
+        const sentMB = ~~(trafficData[processName].sent / 1000000);
+        const receivedMB = ~~(trafficData[processName].received / 1000000);
+
+        if (row.cells[0].textContent === processName) {
+
+          if(sentKB > 1) {
+            row.cells[1].textContent = sentKB + ' KB';
+          } 
+          else if(sentMB > 1) {
+            row.cells[1].textContent = sentMB + ' MB';
+          } 
+          else {
+            row.cells[1].textContent = trafficData[processName].sent;
+          }
+
+          if(receivedKB > 1) {
+            row.cells[2].textContent = receivedKB + ' KB';
+          } 
+          else if(receivedMB > 1) {
+            row.cells[2].textContent = receivedMB + ' MB';
+          } 
+          else {
+            row.cells[2].textContent = trafficData[processName].received;
+          }
+
+          break;
+        }
+      }
+    }
+
+    let packetCount = 0;
+
+    socket.on('packet', (data) => {
+      const [direction, port, processName, byteSize] = data.split(' ');
+      
+      if (!trafficData[processName]) {
+        trafficData[processName] = { received: 0, sent: 0 };
+
+        const row = table.insertRow(-1);
+        row.insertCell(0).textContent = processName;
+        row.insertCell(1).textContent = trafficData[processName].sent;
+        row.insertCell(2).textContent = trafficData[processName].received;
+      }
+
+      if (direction === "R") {
+        trafficData[processName].received += parseInt(byteSize, 10);
+      } else if (direction === "S") {
+        trafficData[processName].sent += parseInt(byteSize, 10);
+      }
+
+      if(packetCount >= updateTableRate){
+        packetCount = 0;
+        updateTable(processName);
+      } 
+      else {
+        packetCount++;
+      }
+    });
+  </script>
+</body>
+</html>
