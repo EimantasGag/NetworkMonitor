@@ -1,18 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap" rel="stylesheet">
   <meta charset="UTF-8" />
   <title>Network Packet Monitor</title>
   <style>
-    body { font-family: Arial; }
+    body { font-family: 'Poppins', sans-serif; }
     table { border-collapse: collapse; width: 100%; }
     th, td { border: 1px solid #ddd; padding: 8px; }
     th { background-color: #f2f2f2; }
   </style>
 </head>
-<body>
-  <h1>Live Packet Data</h1>
-  <table id="packetTable">
+<body style="margin: 40px;">
+  <h1>Live Network Data</h1>
+  <table id="packetTable" style="width: 60%; margin: 60px auto 0 auto;">
     <tr>
       <th>Process</th>
       <th>Sent bytes</th>
@@ -27,37 +28,34 @@
     const table = document.getElementById('packetTable');
     const updateTableRate = 100; // Update every 100 packets
 
-    function updateTable(processName) {
+    function updateTable() {
       for (let i = 1; i < table.rows.length; i++) {
         const row = table.rows[i];
+        const processName = row.cells[0].textContent;
+
         const sentKB = ~~(trafficData[processName].sent / 1000);
         const receivedKB = ~~(trafficData[processName].received / 1000);
         const sentMB = ~~(trafficData[processName].sent / 1000000);
         const receivedMB = ~~(trafficData[processName].received / 1000000);
 
-        if (row.cells[0].textContent === processName) {
+        if(sentKB > 1) {
+          row.cells[1].textContent = sentKB + ' KB';
+        } 
+        else if(sentMB > 1) {
+          row.cells[1].textContent = sentMB + ' MB';
+        } 
+        else {
+          row.cells[1].textContent = trafficData[processName].sent;
+        }
 
-          if(sentKB > 1) {
-            row.cells[1].textContent = sentKB + ' KB';
-          } 
-          else if(sentMB > 1) {
-            row.cells[1].textContent = sentMB + ' MB';
-          } 
-          else {
-            row.cells[1].textContent = trafficData[processName].sent;
-          }
-
-          if(receivedKB > 1) {
-            row.cells[2].textContent = receivedKB + ' KB';
-          } 
-          else if(receivedMB > 1) {
-            row.cells[2].textContent = receivedMB + ' MB';
-          } 
-          else {
-            row.cells[2].textContent = trafficData[processName].received;
-          }
-
-          break;
+        if(receivedKB > 1) {
+          row.cells[2].textContent = receivedKB + ' KB';
+        } 
+        else if(receivedMB > 1) {
+          row.cells[2].textContent = receivedMB + ' MB';
+        } 
+        else {
+          row.cells[2].textContent = trafficData[processName].received;
         }
       }
     }

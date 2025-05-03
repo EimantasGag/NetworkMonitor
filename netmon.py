@@ -29,42 +29,34 @@ def find_processname_by_pid(pid):
             return None
     return None
 
+def create_message(packet):
+    packet_mac = packet.eth.dst
+    length = int(packet.frame_info.len)
+    
+    if packet_mac == host_mac:
+        port = int(packet.tcp.dstport)
+        proc_name = find_processname_by_pid(find_pid_by_port(port))
+        if proc_name is None:
+            msg = f"R {port} {packet.ip.src} {length}"
+        else:
+            msg = f"R {port} {proc_name.replace(" ", "_")} {length}"
+    else:
+        port = int(packet.tcp.srcport)
+        proc_name = find_processname_by_pid(find_pid_by_port(port))
+        if proc_name is None:
+            msg = f"S {port} {packet.ip.dst} {length}"
+        else:
+            msg = f"S {port} {proc_name.replace(" ", "_")} {length}"
+
+    return msg
+
 def resolve_packets(capture, websocket):
     for packet in capture.sniff_continuously():
         try:
-            packet_mac = packet.eth.dst
-            length = int(packet.frame_info.len)
-
             if hasattr(packet, 'tcp'):
-                if packet_mac == host_mac:
-                    port = int(packet.tcp.dstport)
-                    proc_name = find_processname_by_pid(find_pid_by_port(port))
-                    if proc_name is None:
-                        msg = f"R {port} UnknownProcess {length}"
-                    else:
-                        msg = f"R {port} {proc_name.replace(" ", "_")} {length}"
-                else:
-                    port = int(packet.tcp.srcport)
-                    proc_name = find_processname_by_pid(find_pid_by_port(port))
-                    if proc_name is None:
-                        msg = f"S {port} UnknownProcess {length}"
-                    else:
-                        msg = f"S {port} {proc_name.replace(" ", "_")} {length}"
+                msg = create_message(packet)
             elif hasattr(packet, 'udp'):
-                if packet_mac == host_mac:
-                    port = int(packet.udp.dstport)
-                    proc_name = find_processname_by_pid(find_pid_by_port(port))
-                    if proc_name is None:
-                        msg = f"R {port} UnknownProcess {length}"
-                    else:
-                        msg = f"R {port} {proc_name.replace(" ", "_")} {length}"
-                else:
-                    port = int(packet.udp.srcport)
-                    proc_name = find_processname_by_pid(find_pid_by_port(port))
-                    if proc_name is None:
-                        msg = f"S {port} UnknownProcess {length}"
-                    else:
-                        msg = f"S {port} {proc_name.replace(" ", "_")} {length}"
+                msg = create_message(packet)
             else:
                 msg = None
         except AttributeError:
