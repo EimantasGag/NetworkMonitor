@@ -13,6 +13,7 @@ host_interface = 'Ethernet'
 host_mac = None
 
 cachedPorts = {} # port -> process name
+cachedHostnames = {} # ip -> hostname
 processIconsSent = set() # list of processes names that had their icon sent
 
 def get_mac_address(interface_name):
@@ -50,11 +51,9 @@ def find_processname_by_pid(packet, pid):
             process = psutil.Process(pid)
             return process.name()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            if is_receiving_packet(packet):
-                return packet.ip.src
-            else:
-                return packet.ip.dst
-    return None
+            return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+
+    return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
 
 def get_port(packet, direction):
     if hasattr(packet, 'tcp'):
@@ -109,14 +108,14 @@ def get_icon_from_exe(exe_path):
 def is_receiving_packet(packet):
     return packet.eth.dst == host_mac
 
-def create_icon_message(packet, port):
-    pid = find_pid_by_port(port)
+def create_icon_message(packet, host_port):
+    pid = find_pid_by_port(host_port)
 
-    if port not in cachedPorts:    
+    if host_port not in cachedPorts:    
         proc_name = find_processname_by_pid(packet, pid)
-        cachedPorts[port] = proc_name
+        cachedPorts[host_port] = proc_name
     else:
-        proc_name = cachedPorts[port]
+        proc_name = cachedPorts[host_port]
 
     if proc_name in processIconsSent or proc_name is None:
         return None
@@ -128,56 +127,40 @@ def create_icon_message(packet, port):
     if icon is None:
         return None
     else:
-        return f"I {proc_name} {icon} X"
+        return f"I {proc_name} {icon}"
 
 # Function can only be called for tcp and udp packets
 def create_message(packet):
     length = int(packet.frame_info.len)
-    
-    # Receiving packets
-    if is_receiving_packet(packet):
-        port = get_port(packet, 'dst')
 
-        if port not in cachedPorts:
-            proc_name = find_processname_by_pid(packet, find_pid_by_port(port))
+    host_port = get_port(packet, 'dst') if is_receiving_packet(packet) else get_port(packet, 'src')
+    server_port = get_port(packet, 'src') if is_receiving_packet(packet) else get_port(packet, 'dst')
+    host_ip = packet.ip.dst if is_receiving_packet(packet) else packet.ip.src
+    server_ip = packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+    direction_char = 'R' if is_receiving_packet(packet) else 'S'
 
-            # If a packet is received on port 80 or 443, get the hostname by IP
-            if get_port(packet, 'src') == "80" or get_port(packet, 'src') == "443":
-                hostname = get_hostname_by_ip(packet.ip.src)
-                if hostname is not None:
-                    proc_name = hostname
+    hostname = None
+    proc_name = None
 
-            print("Process path: ", get_executable_path_by_pid(find_pid_by_port(port)))
-            cachedPorts[port] = proc_name
-        else:
-            proc_name = cachedPorts[port]
+    if host_port not in cachedPorts:
+        proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
 
-        if proc_name is None:
-            msg = f"R {port} {packet.ip.src} {length}"
-        else:
-            msg = f"R {port} {proc_name.replace(" ", "_")} {length}"
-    # Sending packets
-    else: 
-        port = get_port(packet, 'src')
+        # If a packet is received on port 80 or 443, get the hostname by IP
+        if server_port == "80" or server_port == "443":
+            hostname = get_hostname_by_ip(server_ip)
 
-        if port not in cachedPorts:
-            proc_name = find_processname_by_pid(packet, find_pid_by_port(port))
+        cachedPorts[host_port] = proc_name
+        cachedHostnames[server_ip] = hostname
+    else:
+        proc_name = cachedPorts[host_port]
+        if server_ip in cachedHostnames:
+            hostname = cachedHostnames[server_ip]
 
-            # If a packet is received on port 80 or 443, get the hostname by IP
-            if get_port(packet, 'dst') == "80" or get_port(packet, 'dst') == "443":
-                hostname = get_hostname_by_ip(packet.ip.dst)
-                if hostname is not None:
-                    proc_name = hostname
-
-            cachedPorts[port] = proc_name
-        else:
-            proc_name = cachedPorts[port]
-
-        if proc_name is None:
-            msg = f"S {port} {packet.ip.dst} {length}"
-        else:
-            msg = f"S {port} {proc_name.replace(" ", "_")} {length}"
-
+    if hostname is not None:
+        msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} {hostname} {length}"
+    else:
+        msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} _ {length}"
+ 
     return msg
 
 def resolve_packets(capture, websocket):
@@ -192,9 +175,10 @@ def resolve_packets(capture, websocket):
                     icon_msg = create_icon_message(packet, get_port(packet, 'src'))
             else:
                 msg = None
-        except AttributeError:
-            msg = None
-
+        except AttributeError as e:
+            print("[-] AttributeError: ", e)
+            return
+        
         try:
             if msg is not None:
                 websocket.send(msg)

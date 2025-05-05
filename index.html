@@ -61,7 +61,7 @@
     }
 
     function addIcons(data){
-      const [type, processName, base64Image, _] = data.split(' ');
+      const [type, processName, base64Image] = data.split(' ');
 
       // Loop through all table rows
       const rows = document.querySelectorAll("table tr");
@@ -87,15 +87,16 @@
     let packetCount = 0;
 
     socket.on('packet', (data) => {
+      console.log(data);
       const packetType = data.split(' ')[0];
       
       if(packetType === "I"){
-        console.log("Image icon arrived: " + data.split(' '));
+        
         addIcons(data);
         return;
       }
 
-      const [direction, port, processName, byteSize] = data.split(' ');
+      const [direction, port, processName, hostname, byteSize] = data.split(' ');
 
       if (!trafficData[processName]) {
         trafficData[processName] = { received: 0, sent: 0 };
