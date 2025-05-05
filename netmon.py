@@ -44,13 +44,16 @@ def get_executable_path_by_pid(pid):
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
         return None
 
-def find_processname_by_pid(pid):
+def find_processname_by_pid(packet, pid):
     if pid is not None:
         try:
             process = psutil.Process(pid)
             return process.name()
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return None
+            if is_receiving_packet(packet):
+                return packet.ip.src
+            else:
+                return packet.ip.dst
     return None
 
 def get_port(packet, direction):
@@ -69,12 +72,12 @@ def get_port(packet, direction):
 def get_icon_from_exe(exe_path):
     try:
         # Load icon from file
-        _, small = win32gui.ExtractIconEx(exe_path, 0)
-        if not small:
+        large, _ = win32gui.ExtractIconEx(exe_path, 0)
+        if not large:
             return None
 
         # Use the large icon if available, else small
-        hicon = small[0]
+        hicon = large[0]
 
         # Get icon info
         hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
@@ -89,13 +92,16 @@ def get_icon_from_exe(exe_path):
         bmpstr = hbmp.GetBitmapBits(True)
 
         image = Image.frombuffer(
-            'RGB',
+            'RGBA',
             (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
-            bmpstr, 'raw', 'BGRX', 0, 1
+            bmpstr, 'raw', 'BGRA', 0, 1
         )
-        #image = image.transpose(Image.FLIP_TOP_BOTTOM)
 
-        return image
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+        return image_base64
 
     except Exception as e:
         return None
@@ -103,16 +109,16 @@ def get_icon_from_exe(exe_path):
 def is_receiving_packet(packet):
     return packet.eth.dst == host_mac
 
-def create_icon_message(port):
+def create_icon_message(packet, port):
     pid = find_pid_by_port(port)
 
     if port not in cachedPorts:    
-        proc_name = find_processname_by_pid(pid)
+        proc_name = find_processname_by_pid(packet, pid)
         cachedPorts[port] = proc_name
     else:
         proc_name = cachedPorts[port]
 
-    if proc_name in processIconsSent:
+    if proc_name in processIconsSent or proc_name is None:
         return None
 
     exe_path = get_executable_path_by_pid(pid)
@@ -122,12 +128,7 @@ def create_icon_message(port):
     if icon is None:
         return None
     else:
-        # Convert the Image to a base64 string
-        buffer = BytesIO()
-        icon.save(buffer, format="PNG")
-        icon_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-
-        return f"I {proc_name} {icon_base64} X"
+        return f"I {proc_name} {icon} X"
 
 # Function can only be called for tcp and udp packets
 def create_message(packet):
@@ -138,13 +139,13 @@ def create_message(packet):
         port = get_port(packet, 'dst')
 
         if port not in cachedPorts:
-            proc_name = find_processname_by_pid(find_pid_by_port(port))
+            proc_name = find_processname_by_pid(packet, find_pid_by_port(port))
 
             # If a packet is received on port 80 or 443, get the hostname by IP
             if get_port(packet, 'src') == "80" or get_port(packet, 'src') == "443":
-                proc_name = get_hostname_by_ip(packet.ip.src)
-                if proc_name is None:
-                    proc_name = packet.ip.src
+                hostname = get_hostname_by_ip(packet.ip.src)
+                if hostname is not None:
+                    proc_name = hostname
 
             print("Process path: ", get_executable_path_by_pid(find_pid_by_port(port)))
             cachedPorts[port] = proc_name
@@ -160,13 +161,13 @@ def create_message(packet):
         port = get_port(packet, 'src')
 
         if port not in cachedPorts:
-            proc_name = find_processname_by_pid(find_pid_by_port(port))
+            proc_name = find_processname_by_pid(packet, find_pid_by_port(port))
 
             # If a packet is received on port 80 or 443, get the hostname by IP
             if get_port(packet, 'dst') == "80" or get_port(packet, 'dst') == "443":
-                proc_name = get_hostname_by_ip(packet.ip.dst)
-                if proc_name is None:
-                    proc_name = packet.ip.dst
+                hostname = get_hostname_by_ip(packet.ip.dst)
+                if hostname is not None:
+                    proc_name = hostname
 
             cachedPorts[port] = proc_name
         else:
@@ -186,9 +187,9 @@ def resolve_packets(capture, websocket):
                 msg = create_message(packet)
 
                 if is_receiving_packet(packet):
-                    icon_msg = create_icon_message(get_port(packet, 'dst'))
+                    icon_msg = create_icon_message(packet, get_port(packet, 'dst'))
                 else:
-                    icon_msg = create_icon_message(get_port(packet, 'src'))
+                    icon_msg = create_icon_message(packet, get_port(packet, 'src'))
             else:
                 msg = None
         except AttributeError:

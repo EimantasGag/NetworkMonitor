@@ -60,38 +60,42 @@
       }
     }
 
+    function addIcons(data){
+      const [type, processName, base64Image, _] = data.split(' ');
+
+      // Loop through all table rows
+      const rows = document.querySelectorAll("table tr");
+
+      for (let i = 0; i < rows.length; i++) {
+        const td = rows[i].querySelector("td");  // Get the <td> in the row
+        if (td && td.textContent.trim() === processName) {
+          // Create the image element
+          const img = document.createElement("img");
+          img.src = `data:image/png;base64,${base64Image}`;
+          img.alt = "Icon";
+          img.style.height = "22px";
+          img.style.verticalAlign = "middle";
+          img.style.marginRight = "5px";
+
+          // Insert the image before the text in the <td> (Process)
+          td.insertBefore(img, td.firstChild);
+          break;  // We found the header, no need to continue looping
+        }
+      }
+    }
+
     let packetCount = 0;
 
     socket.on('packet', (data) => {
-      const [direction, port, processName, byteSize] = data.split(' ');
+      const packetType = data.split(' ')[0];
       
-      if(direction === "I"){
+      if(packetType === "I"){
         console.log("Image icon arrived: " + data.split(' '));
-
-        // Base64 image string (example)
-        const base64Image = processName;
-
-        // Loop through all table rows
-        const rows = document.querySelectorAll("table tr");
-
-        for (let i = 0; i < rows.length; i++) {
-          const td = rows[i].querySelector("td");  // Get the <td> in the row
-          if (td && td.textContent.trim() === port) {
-            // Create the image element
-            const img = document.createElement("img");
-            img.src = `data:image/png;base64,${base64Image}`;
-            img.alt = "Icon";
-            img.style.height = "22px";
-            img.style.verticalAlign = "middle";
-            img.style.marginRight = "5px";
-
-            // Insert the image before the text in the <td> (Process)
-            td.insertBefore(img, td.firstChild);
-            break;  // We found the header, no need to continue looping
-          }
-        }
+        addIcons(data);
         return;
       }
+
+      const [direction, port, processName, byteSize] = data.split(' ');
 
       if (!trafficData[processName]) {
         trafficData[processName] = { received: 0, sent: 0 };
