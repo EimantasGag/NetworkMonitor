@@ -105,6 +105,7 @@
         row.insertCell(0).textContent = processName;
         row.insertCell(1).textContent = trafficData[processName].sent;
         row.insertCell(2).textContent = trafficData[processName].received;
+        updateTable(processName);
       }
 
       if (direction === "R") {

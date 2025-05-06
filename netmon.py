@@ -8,11 +8,12 @@ from PIL import Image
 import win32con
 from io import BytesIO
 import base64
+import traceback
 
 host_interface = 'Ethernet'
 host_mac = None
 
-cachedPorts = {} # port -> process name
+cachedPID = {} # pid -> process name
 cachedHostnames = {} # ip -> hostname
 processIconsSent = set() # list of processes names that had their icon sent
 
@@ -46,27 +47,29 @@ def get_executable_path_by_pid(pid):
         return None
 
 def find_processname_by_pid(packet, pid):
-    if pid is not None:
-        try:
-            process = psutil.Process(pid)
-            return process.name()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+    if pid in cachedPID:
+        return cachedPID[pid]
+    
+    exe_path = get_executable_path_by_pid(pid)
+    print("Exe path: ", exe_path)
 
-    return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+    if exe_path is None or exe_path == "":
+        server_ip = get_server_ip(packet)
+        cachedPID[pid] = server_ip
+        return server_ip
+    
+    cachedPID[pid] = exe_path.split("\\")[-1]
+    return exe_path.split("\\")[-1]
 
-def get_port(packet, direction):
-    if hasattr(packet, 'tcp'):
-        if direction == 'src':
-            return packet.tcp.srcport
-        elif direction == 'dst':
-            return packet.tcp.dstport
-    elif hasattr(packet, 'udp'):
-        if direction == 'src':
-            return packet.udp.srcport
-        elif direction == 'dst':
-            return packet.udp.dstport
-    return None
+# def find_processname_by_pid(packet, pid):
+#     if pid is not None:
+#         try:
+#             process = psutil.Process(pid)
+#             return process.name()
+#         except (psutil.NoSuchProcess, psutil.AccessDenied):
+#             return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+
+#     return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
 
 def get_icon_from_exe(exe_path):
     try:
@@ -111,11 +114,7 @@ def is_receiving_packet(packet):
 def create_icon_message(packet, host_port):
     pid = find_pid_by_port(host_port)
 
-    if host_port not in cachedPorts:    
-        proc_name = find_processname_by_pid(packet, pid)
-        cachedPorts[host_port] = proc_name
-    else:
-        proc_name = cachedPorts[host_port]
+    proc_name = find_processname_by_pid(packet, pid)
 
     if proc_name in processIconsSent or proc_name is None:
         return None
@@ -128,33 +127,68 @@ def create_icon_message(packet, host_port):
         return None
     else:
         return f"I {proc_name} {icon}"
+    
+def get_server_ip(packet):
+    if hasattr(packet, 'ip'):
+        return packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+    elif hasattr(packet, 'ipv6'):
+        return packet.ipv6.src if is_receiving_packet(packet) else packet.ipv6.dst
+    return None
+
+def get_host_ip(packet):
+    if hasattr(packet, 'ip'):
+        return packet.ip.dst if is_receiving_packet(packet) else packet.ip.src
+    elif hasattr(packet, 'ipv6'):
+        return packet.ipv6.dst if is_receiving_packet(packet) else packet.ipv6.src
+    return None
+
+def get_host_port(packet):
+    if hasattr(packet, 'tcp'):
+        if is_receiving_packet(packet):
+            return packet.tcp.dstport
+        else:
+            return packet.tcp.srcport
+    elif hasattr(packet, 'udp'):
+        if is_receiving_packet(packet):
+            return packet.udp.dstport
+        else:
+            return packet.udp.srcport
+    return None
+
+def get_server_port(packet):
+    if hasattr(packet, 'tcp'):
+        if is_receiving_packet(packet):
+            return packet.tcp.srcport
+        else:
+            return packet.tcp.dstport
+    elif hasattr(packet, 'udp'):
+        if is_receiving_packet(packet):
+            return packet.udp.srcport
+        else:
+            return packet.udp.dstport
+    return None
 
 # Function can only be called for tcp and udp packets
 def create_message(packet):
     length = int(packet.frame_info.len)
 
-    host_port = get_port(packet, 'dst') if is_receiving_packet(packet) else get_port(packet, 'src')
-    server_port = get_port(packet, 'src') if is_receiving_packet(packet) else get_port(packet, 'dst')
-    host_ip = packet.ip.dst if is_receiving_packet(packet) else packet.ip.src
-    server_ip = packet.ip.src if is_receiving_packet(packet) else packet.ip.dst
+    host_port = get_host_port(packet)
+    server_port = get_server_port(packet)
+    host_ip = get_host_ip(packet)
+    server_ip = get_server_ip(packet)
+
     direction_char = 'R' if is_receiving_packet(packet) else 'S'
 
     hostname = None
-    proc_name = None
+    proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
 
-    if host_port not in cachedPorts:
-        proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
-
-        # If a packet is received on port 80 or 443, get the hostname by IP
+    # If a packet is received on port 80 or 443, get the hostname by IP
+    if server_ip not in cachedHostnames:
         if server_port == "80" or server_port == "443":
             hostname = get_hostname_by_ip(server_ip)
-
-        cachedPorts[host_port] = proc_name
         cachedHostnames[server_ip] = hostname
     else:
-        proc_name = cachedPorts[host_port]
-        if server_ip in cachedHostnames:
-            hostname = cachedHostnames[server_ip]
+        hostname = cachedHostnames[server_ip]
 
     if hostname is not None:
         msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} {hostname} {length}"
@@ -164,20 +198,16 @@ def create_message(packet):
     return msg
 
 def resolve_packets(capture, websocket):
+    icon_msg = None
+    msg = None
+
     for packet in capture.sniff_continuously():
         try:
             if hasattr(packet, 'tcp') or hasattr(packet, 'udp'):
                 msg = create_message(packet)
-
-                if is_receiving_packet(packet):
-                    icon_msg = create_icon_message(packet, get_port(packet, 'dst'))
-                else:
-                    icon_msg = create_icon_message(packet, get_port(packet, 'src'))
-            else:
-                msg = None
+                icon_msg = create_icon_message(packet, get_host_port(packet))
         except AttributeError as e:
-            print("[-] AttributeError: ", e)
-            return
+            traceback.print_exc()
         
         try:
             if msg is not None:
