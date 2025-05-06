@@ -87,16 +87,16 @@
     let packetCount = 0;
 
     socket.on('packet', (data) => {
-      console.log(data);
+      //console.log(data);
       const packetType = data.split(' ')[0];
       
       if(packetType === "I"){
-        
         addIcons(data);
         return;
       }
 
       const [direction, port, processName, hostname, byteSize] = data.split(' ');
+      const newRow = false;
 
       if (!trafficData[processName]) {
         trafficData[processName] = { received: 0, sent: 0 };
@@ -105,7 +105,7 @@
         row.insertCell(0).textContent = processName;
         row.insertCell(1).textContent = trafficData[processName].sent;
         row.insertCell(2).textContent = trafficData[processName].received;
-        updateTable(processName);
+        newRow = true;     
       }
 
       if (direction === "R") {
@@ -114,7 +114,7 @@
         trafficData[processName].sent += parseInt(byteSize, 10);
       }
 
-      if(packetCount >= updateTableRate){
+      if(packetCount >= updateTableRate || newRow){
         packetCount = 0;
         updateTable(processName);
       } 
