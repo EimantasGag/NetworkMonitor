@@ -96,7 +96,7 @@
       }
 
       const [direction, port, processName, hostname, byteSize] = data.split(' ');
-      const newRow = false;
+      let newRow = false;
 
       if (!trafficData[processName]) {
         trafficData[processName] = { received: 0, sent: 0 };
