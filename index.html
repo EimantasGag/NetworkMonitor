@@ -87,15 +87,14 @@
     let packetCount = 0;
 
     socket.on('packet', (data) => {
-      //console.log(data);
-      const packetType = data.split(' ')[0];
+      // const packetType = data.split(' ')[0];
       
-      if(packetType === "I"){
-        addIcons(data);
-        return;
-      }
+      // if(packetType === "I"){
+      //   addIcons(data);
+      //   return;
+      // }
 
-      const [direction, port, processName, hostname, byteSize] = data.split(' ');
+      const { isReceiving, port, processName, hostname, byteSize } = data;
       let newRow = false;
 
       if (!trafficData[processName]) {
@@ -108,9 +107,9 @@
         newRow = true;     
       }
 
-      if (direction === "R") {
+      if (isReceiving) {
         trafficData[processName].received += parseInt(byteSize, 10);
-      } else if (direction === "S") {
+      } else {
         trafficData[processName].sent += parseInt(byteSize, 10);
       }
 

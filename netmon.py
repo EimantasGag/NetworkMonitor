@@ -11,6 +11,7 @@ import base64
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import packetinfo_pb2
 
 host_interface = 'Ethernet'
 host_mac = None
@@ -193,8 +194,6 @@ def create_message(packet):
     host_ip = get_host_ip(packet)
     server_ip = get_server_ip(packet)
 
-    direction_char = 'R' if is_receiving_packet(packet) else 'S'
-
     hostname = None
     proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
 
@@ -207,10 +206,17 @@ def create_message(packet):
             else:
                 hostname = cachedHostnames[server_ip]
 
-    if hostname is not None:
-        msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} {hostname} {length}"
+    msg = packetinfo_pb2.PacketInfo()
+    msg.isReceiving = is_receiving_packet(packet)
+    msg.port = int(host_port)
+    msg.process_name = proc_name
+
+    if hostname is None:
+        msg.hostname = "_"
     else:
-        msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} _ {length}"
+        msg.hostname = hostname
+
+    msg.length = length
  
     return msg
 
@@ -220,9 +226,11 @@ def resolve_packet(packet, websocket):
 
     try:
         if msg is not None:
-            websocket.send(msg)
+            websocket.send(msg.SerializeToString())
         if icon_msg is not None:
-            websocket.send(icon_msg)
+            # Kolkas sito nedarom, kol issiaisknsiu su protobuf
+            #websocket.send(icon_msg)
+            pass
     except Exception as e:
         print(f"[-] Error sending message: {e}")
 

@@ -1,1 +1,4 @@
 node_modules/
+__pycache__/
+packetinfo_pb.js
+packetinfo_pb2.py

@@ -3,6 +3,9 @@ const WebSocket = require('ws');
 const { Server } = require('socket.io');
 const fs = require('fs');
 
+const protobuf = require("google-protobuf");
+const messages = require("./packetinfo_pb.js");
+
 const server = http.createServer(function(req, res) {
   res.writeHead(200, { 'Content-Type': 'text/html' });
   fs.readFile(__dirname + '/index.html', (err, data) => {
@@ -34,8 +37,15 @@ pythonWss.on('connection', (ws) => {
   console.log('[+] Python client connected.');
 
   ws.on('message', (msg) => {
-    //console.log('[*] From Python:', msg.toString());
-    io.emit('packet', msg.toString()); // Broadcast to browser
+    const packetInfo = messages.PacketInfo.deserializeBinary(msg);
+    
+    io.emit('packet', {
+      isReceiving: packetInfo.getIsreceiving(),
+      port: packetInfo.getPort(),
+      processName: packetInfo.getProcessName(),
+      hostname: packetInfo.getHostname(),
+      byteSize: packetInfo.getLength()
+    }); 
   });
 
   ws.on('close', () => {
