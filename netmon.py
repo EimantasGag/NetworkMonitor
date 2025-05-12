@@ -24,6 +24,12 @@ cachedHostnames_lock = threading.Lock()
 processIconsSent = set() # list of processes names that had their icon sent
 processIconsSent_lock = threading.Lock()
 
+def split_last(s, delimiter):
+    pos = s.rfind(delimiter)
+    if pos == -1:
+        return s  # If delimiter not found, return the whole string
+    return s[pos + len(delimiter):]  # Return the part after the last delimiter
+
 def get_mac_address(interface_name):
     addrs = psutil.net_if_addrs()
     for addr in addrs.get(interface_name, []):
@@ -66,9 +72,9 @@ def find_processname_by_pid(packet, pid):
             cachedPID[pid] = server_ip
             return server_ip
         
-        cachedPID[pid] = exe_path.split("\\")[-1]
+        cachedPID[pid] = split_last(exe_path, "\\")
 
-    return exe_path.split("\\")[-1]
+    return split_last(exe_path, "\\")
 
 # def find_processname_by_pid(packet, pid):
 #     if pid is not None:
@@ -193,13 +199,13 @@ def create_message(packet):
     proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
 
     # If a packet is received on port 80 or 443, get the hostname by IP
-    with cachedHostnames_lock:
-        if server_ip not in cachedHostnames:
-            if server_port == "80" or server_port == "443":
+    if server_port == "80" or server_port == "443":
+        with cachedHostnames_lock:
+            if server_ip not in cachedHostnames:
                 hostname = get_hostname_by_ip(server_ip)
-            cachedHostnames[server_ip] = hostname
-        else:
-            hostname = cachedHostnames[server_ip]
+                cachedHostnames[server_ip] = hostname
+            else:
+                hostname = cachedHostnames[server_ip]
 
     if hostname is not None:
         msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} {hostname} {length}"
