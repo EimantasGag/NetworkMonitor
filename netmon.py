@@ -9,13 +9,20 @@ import win32con
 from io import BytesIO
 import base64
 import traceback
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 host_interface = 'Ethernet'
 host_mac = None
 
 cachedPID = {} # pid -> process name
+cachedPID_lock = threading.Lock()
+
 cachedHostnames = {} # ip -> hostname
+cachedHostnames_lock = threading.Lock()
+
 processIconsSent = set() # list of processes names that had their icon sent
+processIconsSent_lock = threading.Lock()
 
 def get_mac_address(interface_name):
     addrs = psutil.net_if_addrs()
@@ -47,18 +54,20 @@ def get_executable_path_by_pid(pid):
         return None
 
 def find_processname_by_pid(packet, pid):
-    if pid in cachedPID:
-        return cachedPID[pid]
-    
-    exe_path = get_executable_path_by_pid(pid)
-    print("Exe path: ", exe_path)
+    with cachedPID_lock:
+        if pid in cachedPID:
+            return cachedPID[pid]
+        
+        exe_path = get_executable_path_by_pid(pid)
+        print("Exe path: ", exe_path)
 
-    if exe_path is None or exe_path == "":
-        server_ip = get_server_ip(packet)
-        cachedPID[pid] = server_ip
-        return server_ip
-    
-    cachedPID[pid] = exe_path.split("\\")[-1]
+        if exe_path is None or exe_path == "":
+            server_ip = get_server_ip(packet)
+            cachedPID[pid] = server_ip
+            return server_ip
+        
+        cachedPID[pid] = exe_path.split("\\")[-1]
+
     return exe_path.split("\\")[-1]
 
 # def find_processname_by_pid(packet, pid):
@@ -116,12 +125,13 @@ def create_icon_message(packet, host_port):
 
     proc_name = find_processname_by_pid(packet, pid)
 
-    if proc_name in processIconsSent or proc_name is None:
-        return None
+    with processIconsSent_lock:
+        if proc_name in processIconsSent or proc_name is None:
+            return None
 
-    exe_path = get_executable_path_by_pid(pid)
-    icon = get_icon_from_exe(exe_path)
-    processIconsSent.add(proc_name)
+        exe_path = get_executable_path_by_pid(pid)
+        icon = get_icon_from_exe(exe_path)
+        processIconsSent.add(proc_name)
 
     if icon is None:
         return None
@@ -183,12 +193,13 @@ def create_message(packet):
     proc_name = find_processname_by_pid(packet, find_pid_by_port(host_port))
 
     # If a packet is received on port 80 or 443, get the hostname by IP
-    if server_ip not in cachedHostnames:
-        if server_port == "80" or server_port == "443":
-            hostname = get_hostname_by_ip(server_ip)
-        cachedHostnames[server_ip] = hostname
-    else:
-        hostname = cachedHostnames[server_ip]
+    with cachedHostnames_lock:
+        if server_ip not in cachedHostnames:
+            if server_port == "80" or server_port == "443":
+                hostname = get_hostname_by_ip(server_ip)
+            cachedHostnames[server_ip] = hostname
+        else:
+            hostname = cachedHostnames[server_ip]
 
     if hostname is not None:
         msg = f"{direction_char} {host_port} {proc_name.replace(" ", "_")} {hostname} {length}"
@@ -197,25 +208,26 @@ def create_message(packet):
  
     return msg
 
-def resolve_packets(capture, websocket):
-    icon_msg = None
-    msg = None
+def resolve_packet(packet, websocket):
+    msg = create_message(packet)
+    icon_msg = create_icon_message(packet, get_host_port(packet))
 
-    for packet in capture.sniff_continuously():
-        try:
-            if hasattr(packet, 'tcp') or hasattr(packet, 'udp'):
-                msg = create_message(packet)
-                icon_msg = create_icon_message(packet, get_host_port(packet))
-        except AttributeError as e:
-            traceback.print_exc()
-        
-        try:
-            if msg is not None:
-                websocket.send(msg)
-            if icon_msg is not None:
-                websocket.send(icon_msg)
-        except Exception as e:
-            print(f"[-] Error sending message: {e}")
+    try:
+        if msg is not None:
+            websocket.send(msg)
+        if icon_msg is not None:
+            websocket.send(icon_msg)
+    except Exception as e:
+        print(f"[-] Error sending message: {e}")
+
+def capture_packets(capture, websocket):
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        for packet in capture.sniff_continuously():
+            try:
+                if hasattr(packet, 'tcp') or hasattr(packet, 'udp'):
+                    executor.submit(resolve_packet, packet, websocket)
+            except AttributeError as e:
+                traceback.print_exc()
             
 def main():
     uri = "ws://localhost:50558/python"
@@ -232,7 +244,7 @@ def main():
 
     try:
         with connect(uri) as websocket:
-            resolve_packets(capture, websocket)
+            capture_packets(capture, websocket)
     except Exception as e:
         print(f"[-] Error connecting to WebSocket: {e}")
 
