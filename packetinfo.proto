@@ -1,9 +1,21 @@
 syntax = "proto3";
 
 message PacketInfo {
-  bool isReceiving = 1;
+  bool is_receiving = 1;
   int32 port = 2;
   string process_name = 3;
   string hostname = 4;
   int32 length = 5;
+}
+
+message IconData {
+  string process_name = 1;
+  string base64_image = 2;
+}
+
+message PayloadMessage {
+  oneof payload {
+    PacketInfo packet_msg = 1;
+    IconData icon_msg = 2;
+  }
 }

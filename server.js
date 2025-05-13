@@ -37,15 +37,27 @@ pythonWss.on('connection', (ws) => {
   console.log('[+] Python client connected.');
 
   ws.on('message', (msg) => {
-    const packetInfo = messages.PacketInfo.deserializeBinary(msg);
+    const payloadMessage = messages.PayloadMessage.deserializeBinary(msg);
     
-    io.emit('packet', {
-      isReceiving: packetInfo.getIsreceiving(),
-      port: packetInfo.getPort(),
-      processName: packetInfo.getProcessName(),
-      hostname: packetInfo.getHostname(),
-      byteSize: packetInfo.getLength()
-    }); 
+    if (payloadMessage.getPayloadCase() === messages.PayloadMessage.PayloadCase.PACKET_MSG){
+      const packetMsg = payloadMessage.getPacketMsg();
+
+      io.emit('packet', {
+        isReceiving: packetMsg.getIsReceiving(),
+        port: packetMsg.getPort(),
+        processName: packetMsg.getProcessName(),
+        hostname: packetMsg.getHostname(),
+        byteSize: packetMsg.getLength()
+      }); 
+    } else if(payloadMessage.getPayloadCase() === messages.PayloadMessage.PayloadCase.ICON_MSG){
+      const iconMsg = payloadMessage.getIconMsg();
+
+      io.emit('icon', {
+        processName: iconMsg.getProcessName(),
+        base64Image: iconMsg.getBase64Image()
+      });
+    }
+    
   });
 
   ws.on('close', () => {

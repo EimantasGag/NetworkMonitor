@@ -60,9 +60,7 @@
       }
     }
 
-    function addIcons(data){
-      const [type, processName, base64Image] = data.split(' ');
-
+    function addIcons(processName, base64Image){
       // Loop through all table rows
       const rows = document.querySelectorAll("table tr");
 
@@ -86,14 +84,12 @@
 
     let packetCount = 0;
 
-    socket.on('packet', (data) => {
-      // const packetType = data.split(' ')[0];
-      
-      // if(packetType === "I"){
-      //   addIcons(data);
-      //   return;
-      // }
+    socket.on('icon', (data) => {
+      const { processName, base64Image } = data;
+      addIcons(processName, base64Image);
+    });
 
+    socket.on('packet', (data) => {
       const { isReceiving, port, processName, hostname, byteSize } = data;
       let newRow = false;
 

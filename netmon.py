@@ -142,8 +142,14 @@ def create_icon_message(packet, host_port):
 
     if icon is None:
         return None
-    else:
-        return f"I {proc_name} {icon}"
+    
+    msg = packetinfo_pb2.IconData()
+    msg.process_name = proc_name
+    msg.base64_image = icon
+
+    msg = packetinfo_pb2.PayloadMessage(icon_msg=msg)
+
+    return msg.SerializeToString()
     
 def get_server_ip(packet):
     if hasattr(packet, 'ip'):
@@ -207,7 +213,7 @@ def create_message(packet):
                 hostname = cachedHostnames[server_ip]
 
     msg = packetinfo_pb2.PacketInfo()
-    msg.isReceiving = is_receiving_packet(packet)
+    msg.is_receiving = is_receiving_packet(packet)
     msg.port = int(host_port)
     msg.process_name = proc_name
 
@@ -217,8 +223,10 @@ def create_message(packet):
         msg.hostname = hostname
 
     msg.length = length
+
+    msg = packetinfo_pb2.PayloadMessage(packet_msg=msg)
  
-    return msg
+    return msg.SerializeToString()
 
 def resolve_packet(packet, websocket):
     msg = create_message(packet)
@@ -226,11 +234,9 @@ def resolve_packet(packet, websocket):
 
     try:
         if msg is not None:
-            websocket.send(msg.SerializeToString())
+            websocket.send(msg)
         if icon_msg is not None:
-            # Kolkas sito nedarom, kol issiaisknsiu su protobuf
-            #websocket.send(icon_msg)
-            pass
+            websocket.send(icon_msg)
     except Exception as e:
         print(f"[-] Error sending message: {e}")
 
