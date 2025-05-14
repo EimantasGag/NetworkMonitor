@@ -26,7 +26,9 @@
     const socket = io();
     const trafficData = {};  // Stores data as: { processName: { received: X, sent: Y } }
     const table = document.getElementById('packetTable');
-    const updateTableRate = 100; // Update every 100 packets
+    const updateTableRate = 100; // Update every 100 miliseconds
+
+    let updateTableLoop = window.setInterval(updateTable, updateTableRate);
 
     function updateTable() {
       for (let i = 1; i < table.rows.length; i++) {
@@ -82,8 +84,6 @@
       }
     }
 
-    let packetCount = 0;
-
     socket.on('icon', (data) => {
       const { processName, base64Image } = data;
       addIcons(processName, base64Image);
@@ -109,13 +109,9 @@
         trafficData[processName].sent += parseInt(byteSize, 10);
       }
 
-      if(packetCount >= updateTableRate || newRow){
-        packetCount = 0;
+      if(newRow){
         updateTable(processName);
       } 
-      else {
-        packetCount++;
-      }
     });
   </script>
 </body>
