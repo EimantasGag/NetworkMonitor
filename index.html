@@ -27,6 +27,7 @@
     const trafficData = {};  // Stores data as: { processName: { received: X, sent: Y } }
     const table = document.getElementById('packetTable');
     const updateTableRate = 100; // Update every 100 miliseconds
+    const iconsList = {}; // Stores icons as: { processName: base64Image }
 
     let updateTableLoop = window.setInterval(updateTable, updateTableRate);
 
@@ -62,7 +63,11 @@
       }
     }
 
-    function addIcons(processName, base64Image){
+    function displayIcon(processName, base64Image){
+      if (base64Image === undefined || base64Image === null) {
+        return;
+      }
+      
       // Loop through all table rows
       const rows = document.querySelectorAll("table tr");
 
@@ -86,7 +91,9 @@
 
     socket.on('icon', (data) => {
       const { processName, base64Image } = data;
-      addIcons(processName, base64Image);
+      iconsList[processName] = base64Image; // Store the icon in the iconsList
+
+      displayIcon(processName, base64Image);
     });
 
     socket.on('packet', (data) => {
@@ -101,6 +108,8 @@
         row.insertCell(1).textContent = trafficData[processName].sent;
         row.insertCell(2).textContent = trafficData[processName].received;
         newRow = true;     
+
+        displayIcon(processName, iconsList[processName]);
       }
 
       if (isReceiving) {

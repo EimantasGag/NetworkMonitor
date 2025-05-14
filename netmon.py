@@ -12,9 +12,17 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import packetinfo_pb2
+import time
 
 host_interface = 'Ethernet'
 host_mac = None
+
+curMessageQueue1 = True
+sendMessageQueue1 = {} # (msg.is_receiving, msg.port, msg.process_name, msg.hostname) -> msg 
+sendMessageQueue1_lock = threading.Lock()
+
+sendMessageQueue2 = {} # (msg.is_receiving, msg.port, msg.process_name, msg.hostname) -> msg
+sendMessageQueue2_lock = threading.Lock()
 
 cachedPID = {} # pid -> process name
 cachedPID_lock = threading.Lock()
@@ -24,6 +32,22 @@ cachedHostnames_lock = threading.Lock()
 
 processIconsSent = set() # list of processes names that had their icon sent
 processIconsSent_lock = threading.Lock()
+
+def find_message_in_queue(msg):
+    if curMessageQueue1:
+        with sendMessageQueue1_lock:
+            return sendMessageQueue1.get((msg.is_receiving, msg.port, msg.process_name, msg.hostname))
+        
+    with sendMessageQueue2_lock:
+        return sendMessageQueue2.get((msg.is_receiving, msg.port, msg.process_name, msg.hostname))
+
+def add_message_to_queue(msg):
+    if curMessageQueue1:
+        with sendMessageQueue1_lock:    
+            sendMessageQueue1[(msg.is_receiving, msg.port, msg.process_name, msg.hostname)] = msg
+    else:
+        with sendMessageQueue2_lock:
+            sendMessageQueue2[(msg.is_receiving, msg.port, msg.process_name, msg.hostname)] = msg
 
 def split_last(s, delimiter):
     pos = s.rfind(delimiter)
@@ -224,23 +248,55 @@ def create_message(packet):
 
     msg.length = length
 
-    msg = packetinfo_pb2.PayloadMessage(packet_msg=msg)
- 
-    return msg.SerializeToString()
+    msgInQueue = find_message_in_queue(msg)
+
+    if msgInQueue is not None:
+        msgInQueue.length += length
+    else:
+        add_message_to_queue(msg)
+
+def send_queue_messages(websocket):
+    global curMessageQueue1
+
+    while True:
+        # Switch between the two queues
+        curMessageQueue1 = not curMessageQueue1
+
+        # If curMessageQueue1 is True, send messages from sendMessageQueue2
+        if curMessageQueue1:
+            with sendMessageQueue2_lock:
+                for _, msg in sendMessageQueue2.items():
+                    try:
+                        msg = packetinfo_pb2.PayloadMessage(packet_msg=msg)
+                        websocket.send(msg.SerializeToString())
+                    except Exception as e:
+                        print(f"[-] Error sending message: {e}")
+                sendMessageQueue2.clear()
+        else:
+            with sendMessageQueue1_lock:
+                for _, msg in sendMessageQueue1.items():
+                    try:
+                        msg = packetinfo_pb2.PayloadMessage(packet_msg=msg)
+                        websocket.send(msg.SerializeToString())
+                    except Exception as e:
+                        print(f"[-] Error sending message: {e}")
+                sendMessageQueue1.clear()
+
+        time.sleep(1)
 
 def resolve_packet(packet, websocket):
-    msg = create_message(packet)
+    create_message(packet)
     icon_msg = create_icon_message(packet, get_host_port(packet))
 
     try:
-        if msg is not None:
-            websocket.send(msg)
         if icon_msg is not None:
             websocket.send(icon_msg)
     except Exception as e:
         print(f"[-] Error sending message: {e}")
 
 def capture_packets(capture, websocket):
+    threading.Thread(target=send_queue_messages, args=(websocket,), daemon=True).start()
+
     with ThreadPoolExecutor(max_workers=20) as executor:
         for packet in capture.sniff_continuously():
             try:
